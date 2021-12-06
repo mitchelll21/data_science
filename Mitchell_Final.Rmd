@@ -1,0 +1,1064 @@
+---
+title: "Exploring the Rhetoric Surrounding Male vs Female Athletes on Twitter"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+As someone who has been very involved in both sports media and social media over the years, I have always had an interest in how athletes are discussed. I have found that athletes are often put on high pedestals and it is easy to forget that they are normal people just like us. This past year I have conducted research pertaining to sports and social media for two other classes and wanted to continue with that theme into this project. As a woman in a male dominated industry, I have experienced first hand the difference in how people talk to and about women in sports. With this project, I sought to explore the way female athletes were discussed in comparison to male athletes on Twitter specifically. I chose twitter because of the way it has been utilized for spreading information quickly in the moment and in short bits. Also because often times people say things on twitter to or about people that they would not say to their faces. I assumed the content of the tweets would be a better reflection of how people actually talked about athletes than a magazine article would be. I hypothesized that tweets about women would be more negative due to the narrative of men belonging in sports more than women. I felt the women would be criticized while men would often be praised. 
+Below you will find my web scraping, sentiment analysis, and topic modeling for tweets from a corpus of NCAA March Madness tweets.
+
+```{r}
+
+library(httr)
+library(twitteR)
+library(dplyr)
+library(readr)
+library(tidyr)
+library(stringr)
+library(tibble)
+library(ggplot2)
+library(psych)
+library(yarrr)
+library(rtweet)
+library(tidyverse)
+library(tidytext)
+library(textdata)
+library(reshape2)
+library(wordcloud)
+library(topicmodels)
+library(tm)
+library(stopwords)
+library(lda)
+library(quanteda)
+library(stm)
+library(tidyverse)
+library(janitor)
+library(kableExtra)
+```
+## Mining for Tweets on Twitter
+Initially I wanted to scrape the web for tweets directly from Twitter. This required obtaining developer permission from Twitter itself. Once granted permission to use twitter data for an academic project, you are given APIs and access keys that allow you to pull the tweets. With these things you have the ability to pull a set number of tweets per hour. When I went to pull tweets, however, I was limited to fewer tweets than I felt would be a good sample size. I still wanted to share what I had learned and show off this web scraping so that code is below:
+```{r}
+
+API_key <- '2QzrNmA0DJygRE72AP4rQ9Zav'
+API_secret <- 'wJcbH7E4FgUjsyTVHWeetbYVeBBDBhuxysfnPdJkzMmpBfQNXE'
+bearer <- 'AAAAAAAAAAAAAAAAAAAAAKNyMQEAAAAAzzJs%2FyVlCU6ik%2B3aUXD7Zwrv47c%3DbnETvgAIQdElmbbrrew6dkljAZqVblSUe4bZvPeR0jv9qQ0obN'
+acc_token <- '2736722153-jGsku94gDeosoRsudPB67jk8xY4L4ZDDMv3FQot'
+acc_secret <- 'gPLA8olxw7TIxdCEWdGM7eeSSgtDfKf6TlgDHwE8Ptrff'
+
+setup_twitter_oauth(API_key, API_secret, acc_token, acc_secret)
+
+twitter_example <- searchTwitter('basketball', n = 10, lang = 'en')
+#this line is where you can search a certain word, phrase, or account and pull those tweets
+
+twitter_example_df <- twListToDF(twitter_example)
+```
+## Text analysis
+Due to the limited number of tweets I could access, I looked for a premade corpus of tweets related to athletics of similar levels for men and women. I found this corpus of NCAA tweets from 2015-2019 on kagel and filtered for only 2019.
+```{r}
+
+ncaa_2019 <- read_csv('ncaa_tweets_2019.csv')
+
+#These are the dates of march madness from these years
+#men's tournament - March 19-April 8
+#women's tournament - March 22-April 7
+#so both tournaments fall into this timeline
+
+all_2019 <- ncaa_2019 %>%
+  select(X1, text)
+
+tweets <- ncaa_2019 %>%
+  sample_n(size = 10000, replace = FALSE, prob = NULL, seed = 1234)
+#the corpus contained 283,772 tweets which was a lot for my computer to process. I took a random sample of those tweets to use for analysis instead
+
+tweets_only <- tweets %>%
+  rename('ID' = 'X1') %>%
+  select('ID', 'text')
+```
+
+## Sentiment Analysis
+Sentiment analysis is assigning a positive or negative value to a word based on its meaning. There are several ways to do this with several packages made specifically for R. I used the AFINN and BING packages for my analysis.
+### AFINN 
+AFINN assigns a score -5 to 5 to words with 5 being the most positive and -5 being the most negative words. This is a way to quantify the sentiment of the word.
+```{r}
+sa_tidy <- tweets_only %>%
+  unnest_tokens(output = word, input = text)
+
+sa_afinn <- sa_tidy %>%
+  inner_join(get_sentiments("afinn")) %>%
+  mutate(method = "AFINN")
+
+mean(sa_afinn$value)
+#I took the mean AFINN of all words in the sample 
+#0.61 - so slightly more positive
+```
+
+## Bing
+Bing assigns positive or negative in a binary fashion to the words. In the graph, blue represents positive and pink negative.
+```{r}
+sa_bing_count <- sa_tidy %>%
+  inner_join(get_sentiments('bing')) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+sa_bing_count %>%
+  group_by(sentiment) %>%
+  top_n(10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) + 
+  geom_col(show.legend = FALSE)
+#this ggplot is showing the top 10 most frequent words for both positive and negative. Blue is positive and red is negative.
+```
+
+The word madness appears to bring the sentiment down majorly - so what if I remove because I know the frequency is most likely due to the name of the tournament itself
+
+```{r}
+sa_afinn_nomad <- sa_afinn %>%
+  subset(word != "madness")
+
+mean(sa_afinn_nomad$value)
+#went up to 0.78
+
+Bing_nomad <- sa_bing_count %>%
+  subset(word != "madness")
+
+Bing_nomad %>%
+  group_by(sentiment) %>%
+  top_n(10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) + 
+  geom_col(show.legend = FALSE) +
+  ggsave('bing_all.png')
+
+#without madness, the corpus is visually more positive and a closer reflection to what the AFINN mean is telling us
+```
+
+## filtering tweets by gender
+I wanted to look at how the AFINN and BING changes when looking at tweets about men vs tweets about women. The way I found to designate the 'gender' of a tweet was by creating bigrams based on feminine and masculine pronouns. I then repeated the same process as above with the gendered corpora.
+
+```{r}
+
+library(corpus)
+
+pronouns <- c("he", "she")
+
+bigram_counts_all <- term_stats(all_2019, ngrams = 2, types = TRUE,
+                            subset = type1 %in% pronouns)
+```
+### Women
+Of the 10,000 tweets in this sample, 426 contained 'she'
+```{r}
+all_she <- bigram_counts_all %>%
+  filter(type1 == 'she')
+
+all_she_tidy <- all_she %>%
+  unnest_tokens(output = word, input = type2)
+
+all_she_sa_bing_count <- all_she_tidy %>%
+  inner_join(get_sentiments('bing')) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+all_she_sa_bing_count_top <- all_she_sa_bing_count %>%
+  slice_head(n = 20)
+
+#When I plotted the gendered data like I did with the whole sample, the plots were hard to read and uninformative. So I decided to slice the top 20 most frequent words from the gendered sample and visualize that instead. 
+all_she_sa_bing_count_top %>%
+  group_by(sentiment) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) + 
+  geom_col(show.legend = FALSE)
+
+
+all_she_afinn <- all_she_tidy %>%
+  inner_join(get_sentiments("afinn")) %>%
+  mutate(method = "AFINN")
+
+mean(all_she_afinn$value)
+#0 ... so truly neutral
+```
+We see in the plot that there are more frequent negative words than positive, so how come the AFINN suggests a neutral data set? This could be due to AFINN values varying from -5 to 5 so the negative may be more frequent but the positive values are more positive than the negative are negative.
+
+### Men
+of the 10,000 tweets in this sample, 1,339 contained 'he'
+```{r}
+
+all_he <- bigram_counts_all %>%
+  filter(type1 == 'he')
+
+all_he_tidy <- all_he %>%
+  unnest_tokens(output = word, input = type2)
+
+all_he_sa_bing_count <- all_he_tidy %>%
+  inner_join(get_sentiments('bing')) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+all_he_sa_bing_count_top <- all_he_sa_bing_count %>%
+  slice_head(n = 20)
+
+all_he_sa_bing_count_top %>%
+  group_by(sentiment) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) + 
+  geom_col(show.legend = FALSE)
+
+all_he_afinn <- all_he_tidy %>%
+  inner_join(get_sentiments("afinn")) %>%
+  mutate(method = "AFINN")
+
+mean(all_he_afinn$value)
+#-0.443
+```
+Again it appears there are more negative than positive words but this is reflected in the AFINN with a negative mean value.
+
+I recognized the need to expand the pronouns to better capture the true male vs female population. I redid the above analysis with a more inclusive pronoun set.
+With the inclusion of more pronouns, of the 10,000 tweets in the sample, 1,340 tweets contain female pronouns and 4,477 contain male pronouns
+```{r}
+
+pronouns2 <- c("he", "she", "him", "her", "his", "hers", "himself", "herself")
+
+bigram_counts_all2 <- term_stats(all_2019, ngrams = 2, types = TRUE,
+                            subset = type1 %in% pronouns2)
+print(bigram_counts_all2)
+
+fem_pronouns <- bigram_counts_all2 %>%
+  filter(type1 == 'she'|type1 == 'her'|type1 == 'hers'|type1 == 'herself')
+
+fem_pro_tidy <- fem_pronouns %>%
+  unnest_tokens(output = word, input = type2)
+
+fem_pro_sa_bing_count <- fem_pro_tidy %>%
+  inner_join(get_sentiments('bing')) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+fem_pro_sa_bing_count %>%
+  group_by(sentiment) %>%
+  mutate(word = reorder(word, n)) %>%
+  slice_head(n = 10) %>%
+  ggplot(aes(n, word, fill = sentiment)) + 
+  geom_col(show.legend = FALSE) +
+  ggsave('fem_bing.png')
+
+
+fem_pro_afinn <- fem_pro_tidy %>%
+  inner_join(get_sentiments("afinn")) %>%
+  mutate(method = "AFINN")
+
+mean(fem_pro_afinn$value)
+#0.79
+```
+With the inclusion of more pronouns and therefore more tweets, we see an obvious difference in plots with this one being more obviously positive. Thisobservation is reflected in the mean AFINN value.
+
+```{r}
+male_pronouns <- bigram_counts_all2 %>%
+  filter(type1 == 'he'|type1 == 'him'|type1 == 'his'|type1 == 'himself')
+
+male_pro_tidy <- male_pronouns %>%
+  unnest_tokens(output = word, input = type2)
+
+male_pro_sa_bing_count <- male_pro_tidy %>%
+  inner_join(get_sentiments('bing')) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+male_pro_sa_bing_count %>%
+  group_by(sentiment) %>%
+  mutate(word = reorder(word, n)) %>%
+  slice_head(n = 10) %>%
+  ggplot(aes(n, word, fill = sentiment)) + 
+  geom_col(show.legend = FALSE) +
+  ggsave('man_bing.png')
+
+
+male_pro_afinn <- male_pro_tidy %>%
+  inner_join(get_sentiments("afinn")) %>%
+  mutate(method = "AFINN")
+
+mean(male_pro_afinn$value)
+#-0.065
+```
+With more tweets in this sample, the AFINN mean for male tweets was brought up to a slightly more positive value. In the plot, it does appear that the positive tweets outweigh the negative in frequency, but again the range of AFINN could be what is causing the AFINN mean to reflect a different conclusion.
+
+#### Additional Sentiment Analysis
+I wanted to look at how the AFINN scores compared across the pronouns present in the data set. The tweets were separated into male and female pronouns, like above. The table shows the distribution of the top ten most frequent words for each sentiment score across pronouns. It shows what pronouns are most common for each sentiment score based on the top ten most frequent words for that score.
+
+Following that analysis, I wanted to see how each gender's highest scoring and lowest scoring pronouns related to each other and if there was any similarity. The way slice sorted the data, the lower scoring words were at the top of the data frame and the higher scores were at the bottom.
+```{r}
+
+tabyl(bigram_counts_all, type1, count)
+
+slice_male <- male_pro_afinn %>%
+  group_by(value) %>%
+  slice_head(n = 10)
+
+slice_female <- fem_pro_afinn %>%
+  group_by(value) %>%
+  slice_head(n = 10)
+
+#tables showing frequency of afinn scores by pronoun
+
+slice_m_table <- tabyl(slice_male, type1, value)
+
+slice_f_table <- tabyl(slice_female, type1, value)
+
+gen <- c('male', 'male', 'male')
+
+genf <- c('female', 'female')
+
+slice_m_table$gender <- gen
+
+slice_f_table$gender <- genf
+
+no_5 <- c(0, 0)
+no_n5 <- c(0, 0)
+
+slice_f_table$neg5 <- no_n5
+slice_f_table$five <- no_5
+
+
+colnames(slice_f_table)[11] <- -5
+colnames(slice_f_table)[12] <- 5
+
+slice_f_table <- slice_f_table %>%
+  relocate('-5', .after = '-4') %>%
+  relocate('5', .after = '4')
+
+#best table of all pronouns and frequencies
+slice <- rbind(slice_m_table, slice_f_table)
+
+slice %>%
+  kable() %>%
+  column_spec(2:6, color = "red") %>%
+  column_spec(7:11, color = "teal") %>%
+  kable_styling(position = "left", full_width = FALSE) %>%
+    column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  row_spec(c(1, 3, 5), background = 'lightgray')
+
+pro_afinn <- rbind(male_pro_afinn, fem_pro_afinn)
+
+#what are each gender's lowest scoring words?
+
+fem_bot_ten <- slice_female %>%
+  head(10) %>%
+  select(type1, word, value) 
+
+fem_bot_ten %>%
+  kable() %>%
+  kable_styling(position = "left", full_width = FALSE) %>%
+  column_spec(1, border_right = TRUE) %>% 
+  row_spec(c(1, 3, 5, 7, 9), background = 'lightgray') %>%
+  column_spec(3, color = 'red', bold = TRUE)
+
+
+male_bot_ten <- slice_male %>%
+  head(10) %>%
+  select(type1, word, value)
+  
+
+male_bot_ten %>%
+   kable() %>%
+  kable_styling(position = "left", full_width = FALSE) %>%
+  column_spec(1, border_right = TRUE) %>% 
+  row_spec(c(1, 3, 5, 7, 9), background = 'lightgray') %>%
+  column_spec(3, color = 'red', bold = TRUE)
+  
+fem_top_ten <- slice_female %>%
+  tail(10) %>%
+  select(type1, word, value)
+
+fem_top_ten %>%
+  kable() %>%
+  kable_styling(position = "left", full_width = FALSE) %>%
+  column_spec(1, border_right = TRUE) %>% 
+  row_spec(c(1, 3, 5, 7, 9), background = 'lightgray') %>%
+  column_spec(3, color = 'teal', bold = TRUE)
+
+male_top_ten <- slice_male %>%
+  tail(10) %>%
+  select(type1, word, value)
+
+male_top_ten %>%
+  kable() %>%
+  kable_styling(position = "left", full_width = FALSE) %>%
+  column_spec(1, border_right = TRUE) %>% 
+  row_spec(c(1, 3, 5, 7, 9), background = 'lightgray') %>%
+  column_spec(3, color = 'teal', bold = TRUE)
+
+```
+
+#### proportion of the female and male tweets that were negative versus positive
+```{r}
+fem_pos <- fem_pro_afinn %>%
+  filter(value > 0)
+
+fem_neg <- fem_pro_afinn %>%
+  filter(value < 0)
+
+sum(fem_pos$count) #148
+sum(fem_neg$count) #66
+
+male_pos <- male_pro_afinn %>%
+  filter(value > 0)
+
+male_neg <- male_pro_afinn %>%
+  filter(value < 0)
+
+sum(male_pos$count) #976
+sum(male_neg$count) #721
+
+```
+So of the 1340 tweets that contained feminine pronouns, 214 remained after the removal of stop words and punctuation so they received AFINN scores. Only 11% of all female tweets were scored in the positive direction and 4.9% scored in the negative direction. 
+Of the 4477 tweets that contained masculine pronouns, 1697 were given AFINN scores after removing stop words. Of all tweets containing male pronouns, 21.8% were given positive scores and 16.1% were given negative scores.
+
+When looking at the ten lowest scoring word combinations for each gender, we see that the male pronouns are all associated with expletives whereas only two female pronouns are associated with an expletive. 
+
+I wanted to see if the top 3 worst words associated with feminine pronouns were also present with male pronouns, or if they were exclusively for women. From the two tables above, we see that 'ass' appears with both male and female pronouns, but not at which frequency this occurs.
+
+
+#### frequency of common sports words by gender
+I wanted to see how frequently common words associated with sporting events were used in association with men or women. The left column shows the pronoun and the middle column shows the amount of time the specified word appeared with that specific pronoun.
+```{r}
+
+sa_corp_terms <-  with(bigram_counts_all2,
+               tapply(count, list(type2, type1), identity, default = 0))
+head(sa_corp_terms)
+
+#worst scoring words with female pronouns
+
+badterm <- "ass"
+
+b <- match(badterm, rownames(sa_corp_terms))
+
+btab <- cbind(sa_corp_terms[b,], colSums(sa_corp_terms[-b,]))
+
+colnames(btab) <- c(badterm, paste0("\u00ac", badterm))
+
+print(btab)
+
+asstab <- data.frame(btab)
+
+asstab %>%
+  select('ass') %>%
+  kable() %>%
+  kable_styling(position = "left", full_width = FALSE) %>%
+  column_spec(1, border_right = TRUE) %>%
+  row_spec(c(1, 2,  7), color = 'red')
+
+#a female pronoun appears once with 'ass' but a male pronoun appears 45 times
+
+badterm2 <- "lost"
+
+b2 <- match(badterm2, rownames(sa_corp_terms))
+
+btab2 <- cbind(sa_corp_terms[b2,], colSums(sa_corp_terms[-b2,]))
+
+colnames(btab2) <- c(badterm2, paste0("\u00ac", badterm2))
+
+print(btab2)
+
+losttab <- data.frame(btab2)
+
+losttab %>%
+  select('lost') %>%
+  kable() %>%
+  kable_styling(position = "left", full_width = FALSE) %>%
+  column_spec(1, border_right = TRUE) %>%
+  row_spec(c(1, 8), color = 'red')
+
+#a female pronoun appears with 'lost' 3 times and a male pronouns appears with it 47 times.
+
+badterm3 <- "bad"
+
+b3 <- match(badterm3, rownames(sa_corp_terms))
+
+btab3 <- cbind(sa_corp_terms[b3,], colSums(sa_corp_terms[-b3,]))
+
+colnames(btab3) <- c(badterm3, paste0("\u00ac", badterm3))
+
+print(btab3)
+
+badtab <- data.frame(btab3)
+
+badtab %>%
+  select('bad') %>%
+  kable() %>%
+  kable_styling(position = "left", full_width = FALSE) %>%
+  column_spec(1, border_right = TRUE) %>%
+  row_spec(2, color = 'red')
+
+#The word bad only appears with a female pronoun and it only appears one time
+
+#other terms of interest that I was curious about
+
+term <- "won"
+
+i <- match(term, rownames(sa_corp_terms))
+
+tab <- cbind(sa_corp_terms[i,], colSums(sa_corp_terms[-i,]))
+
+colnames(tab) <- c(term, paste0("\u00ac", term))
+
+print(tab)
+
+wontab <- data.frame(tab)
+
+wontab %>%
+  select('won') %>%
+  kable() %>%
+  kable_styling(position = "left", full_width = FALSE) %>%
+  column_spec(1, border_right = TRUE) %>%
+  row_spec(c(1, 8), color = 'red')
+
+term2 <- "earned"
+
+i2 <- match(term2, rownames(sa_corp_terms))
+
+tab2 <- cbind(sa_corp_terms[i2,], colSums(sa_corp_terms[-i2,]))
+
+colnames(tab2) <- c(term2, paste0("\u00ac", term2))
+
+print(tab2)
+
+earntab <- data.frame(tab2)
+
+earntab %>%
+  select('earned') %>%
+  kable() %>%
+  kable_styling(position = "left", full_width = FALSE) %>%
+  column_spec(1, border_right = TRUE) %>%
+  row_spec(c(1, 7, 8), color = 'red')
+
+term3 <- 'cheated'
+
+i3 <- match(term3, rownames(sa_corp_terms))
+
+tab3 <- cbind(sa_corp_terms[i3,], colSums(sa_corp_terms[-i3,]))
+
+colnames(tab3) <- c(term3, paste0("\u00ac", term3))
+
+print(tab3)
+
+cheat_tab <- data.frame(tab3) 
+
+cheat_tab %>%
+  select('cheated') %>%
+  kable() %>%
+  kable_styling(position = "left", full_width = FALSE) %>%
+  column_spec(1, border_right = TRUE) %>%
+  row_spec(1, color = 'red')
+  
+
+
+```
+I find it interesting that the worst scoring female associated words appear very few times as compared to the male pronouns. I also am very shocked by 'bad' only appearing with one pronoun in the entire sample. I think this showed how many more times men are talked about in tweets than women for the female tweets to be so few and the 'worst' terms being so infrequent.
+
+This trend continued with the other words I looked at out of curiosity. Of course with more male tweets there are going to be more instances of the words, but I thought there would at least be similar counts with the female tweets but there never was.
+
+## Topic Modeling using STM
+### Comparing the Topics in 'Male' Tweets vs 'Female' Tweets as Distinguished Above
+I recognize that by using the bigram distinguished genders for tweets takes away the other words in the tweet. I don't know, however, of any other way to distinguish a male or female tweet and felt it would be better for consistency to use the same method as with sentiment analysis.
+
+The following code is my attempt at topic modeling for the whole sample and the two gendered samples.
+
+### Cleaning Data and Deciding K
+```{r}
+library(stm)
+library(tidyverse)
+
+stm_tweets <- read_csv("ncaa_tweets_2019.csv") %>%
+  sample_n(size = 30000, replace = FALSE, prob = NULL, seed = 4321) %>%
+  select(X1, text) %>%
+  mutate(newID = 1:n()) %>%
+  select(-X1) %>%
+  rename(documents = text)
+
+
+
+processed <- textProcessor(documents = stm_tweets$documents, 
+                          removestopwords = TRUE,
+                          removenumbers = TRUE,
+                          stem = FALSE)
+#added upper and lower thresholds to remove words that were very infrequent or very frequent in hopes of creating a better model
+
+out <- prepDocuments(documents = processed$documents, 
+                     vocab = processed$vocab,
+                     upper.thresh = 19000,
+                     lower.thresh = 660)
+
+set.seed(1)
+tweet_searchK <- searchK(out$documents, out$vocab, K = c(3, 2))
+
+
+# this plots log likelihood, residuals, and sem coherence
+plot(tweet_searchK) 
+
+#I think 2 looks the best because of the high coherence, low residual, and high semantic coherence
+
+# extract exclus as it represents exclus using FREX approach
+extract_searchK <- tweet_searchK$results
+plot(extract_searchK$K, extract_searchK$exclus) 
+
+
+#3 looks better here because of higher exclusivity...
+```
+
+### A further look into 2 vs 3 for all tweets: Exclusivity
+```{r}
+tweet_stm_3 <- stm(documents = out$documents, vocab = out$vocab,
+                       K = 3, 
+                       max.em.its = 75,
+                       init.type = "Spectral")
+
+tweet_stm_2 <- stm(documents = out$documents, vocab = out$vocab,
+                       K = 2, 
+                       max.em.its = 75,
+                       init.type = "Spectral")
+
+#exclusivity 2 vs 3
+
+ex3 <- exclusivity(tweet_stm_3)
+ex3 <- mean(ex3)
+
+ex2 <- exclusivity(tweet_stm_2)
+ex2 <- mean(ex2)
+
+K <- c(3, 2)
+ex <- c(ex3, ex2)
+ex <- data.frame(K, ex)
+plot(ex$K, ex$ex)
+
+#3 is still better here
+
+```
+
+### TM All Tweets: Semantic Coherence of 3 and 2
+```{r}
+sc3 <- semanticCoherence(tweet_stm_3, documents = out$documents)
+sc3 <- mean(sc3)
+
+sc2 <- semanticCoherence(tweet_stm_2, documents = out$documents)
+sc2 <- mean(sc2)
+
+
+K <- c(3, 2)
+sc <- c(sc3, sc2)
+sc <- data.frame(K, sc)
+plot(sc$K, sc$sc)
+
+#2 has the better semantic coherence still so I feel better about 2
+
+```
+
+### Making the Model with K = 2
+```{r}
+tweet_select2 <- selectModel(out$documents, out$vocab, K = 2,
+                               max.em.its = 75,
+                              runs = 20, 
+                             seed = 1)
+
+plotModels(tweet_select2)
+
+selectedmodel_2 <- tweet_select2$runout[[2]]
+
+labelTopics(selectedmodel_2)
+```
+
+
+### Displaying the Topics
+#### FREX
+Frex values combine frequency and exclusivity with frequency being 30% and exclusivity being 70% whereas the beta matrix displays the probability of each word belonging to the topics.
+
+```{r}
+  
+frex_values <- function (stm_obj, w = 0.5, wordcounts = NULL) {
+  logbeta <- stm_obj$beta$logbeta[[1]]
+  excl <- t(t(logbeta) - stm:::col.lse(logbeta))
+  if (!is.null(wordcounts)) {
+    excl <- stm:::safelog(sapply(1:ncol(excl), function(x) js.estimate(exp(excl[,
+                                                                          x]), wordcounts[x])))
+  }
+  freqscore <- apply(logbeta, 1, data.table::frank)/ncol(logbeta)
+  exclscore <- apply(excl, 1, data.table::frank)/ncol(logbeta)
+  frex <- 1/(w/freqscore + (1 - w)/exclscore)
+  frex
+}
+
+
+beta_2 <- tidy(tweet_stm_2, matrix = "beta") %>%
+  pivot_wider(names_from = "topic", values_from = beta,
+              names_prefix = "b" )
+
+words_frombeta <- tidy(tweet_stm_2, matrix = "beta") %>%
+  select(term) %>%
+  distinct() %>%
+  data.frame()
+
+just_frex <- data.frame(frex_values(tweet_stm_2))
+
+word_frex <- bind_cols(words_frombeta, just_frex) %>%
+  rename(Topic1 = X1, Topic2 = X2)
+
+```
+
+
+#### Visualizing FREX and Topics
+This allows us to see the words with the highest frex values in the different topics to decide on a title for the topic
+```{r}
+frex_beta <- full_join(word_frex, beta_2)
+
+frex_top <- word_frex %>%
+  pivot_longer(2:3, names_to = "topic", values_to = "FREX") %>%
+  group_by(topic) %>%
+  top_n(20, FREX)
+
+
+frex_top %>%
+  mutate(term = reorder(term, FREX)) %>%
+  ggplot(aes(term, FREX, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+
+
+```
+I believe the topic titles for these are as follows:
+Topic 1: Generic sports
+Topic 2: Specific teams and tournament
+
+### female topic modeling and analysis
+#### Finding K
+```{r}
+
+gen_stm <- stm_tweets %>%
+  rename(text = documents)
+
+bigram_counts_all_tm <- term_stats(gen_stm, ngrams = 10, types = TRUE,
+                            subset = type1 %in% pronouns2)
+
+tm_fem_pro <- bigram_counts_all_tm %>%
+  filter(type1 == 'she'|type1 == 'her'|type1 == 'hers'|type1 == 'herself')
+  
+stm_female <- tm_fem_pro %>%
+  select(term) %>%
+  mutate(newID = 1:n()) %>%
+  rename(documents = term)
+
+processed_fem <- textProcessor(documents = stm_female$documents, 
+                           removestopwords = TRUE,
+                           removenumbers = TRUE,
+                           stem = FALSE)
+
+out_fem <-  prepDocuments(documents = processed_fem$documents, 
+                     vocab = processed_fem$vocab)
+
+set.seed(2)
+fem_searchK <- searchK(out_fem$documents, out_fem$vocab, 
+                       K = c(2, 3, 4))
+
+
+plot(fem_searchK)
+
+#for Female tweets, I think 3? 2 has higher semco but 3 has lower residuals...
+
+# extract exclus as it represents exclus using FREX approach
+fem_extract_searchK <- fem_searchK$results
+plot(fem_extract_searchK$K, fem_extract_searchK$exclus)
+
+#3 looks better here because of higher exclusivity...
+
+#I am going to look more into 3 and 2 topics 3 has lower residual and higher exclus but 2 has better sem co??
+
+```
+#### Further Female TM Topic Analysis: Exclusivity
+```{r}
+fem_stm_3 <- stm(documents = out_fem$documents, vocab = out_fem$vocab,
+                       K = 3, 
+                       max.em.its = 75,
+                       init.type = "Spectral")
+
+fem_stm_2 <- stm(documents = out_fem$documents, vocab = out_fem$vocab,
+                       K = 2, 
+                       max.em.its = 75,
+                       init.type = "Spectral")
+
+#exclusivity 3 vs 4
+
+fex3 <- exclusivity(fem_stm_3)
+fex3 <- mean(fex3)
+
+fex2 <- exclusivity(fem_stm_2)
+fex2 <- mean(ex2)
+
+
+K <- c(3, 2)
+fex <- c(fex3, fex2)
+fex <- data.frame(K, fex)
+plot(fex$K, fex$fex)
+
+#3 looks gooooooood
+
+```
+#### Further Female TM Analysis: Semantic Coherence
+```{r}
+
+fsc3 <- semanticCoherence(fem_stm_3, documents = out_fem$documents)
+fsc3 <- mean(sc3)
+
+fsc2 <- semanticCoherence(fem_stm_2, documents = out_fem$documents)
+fsc2 <- mean(fsc2)
+
+
+
+K <- c(3, 2)
+fsc <- c(fsc3, fsc2)
+fsc <- data.frame(K, fsc)
+plot(fsc$K, fsc$fsc)
+
+#3 still appears the best here so that is what we are doing
+```
+### Making the Female Tweet Model with K = 3
+```{r}
+fem_select3 <- selectModel(out_fem$documents, out_fem$vocab, K = 3,
+                               max.em.its = 75,
+                              runs = 20, 
+                             seed = 1)
+
+plotModels(fem_select3)
+
+selectedmodel_3 <- fem_select3$runout[[3]]
+
+labelTopics(selectedmodel_3)
+
+
+```
+
+#### Female Tweet FREX
+```{r}
+
+fem_frex_values <- function (stm_obj, w = 0.5, wordcounts = NULL) {
+  logbeta <- stm_obj$beta$logbeta[[1]]
+  excl <- t(t(logbeta) - stm:::col.lse(logbeta))
+  if (!is.null(wordcounts)) {
+    excl <- stm:::safelog(sapply(1:ncol(excl), function(x) js.estimate(exp(excl[,
+                                                                          x]), wordcounts[x])))
+  }
+  freqscore <- apply(logbeta, 1, data.table::frank)/ncol(logbeta)
+  exclscore <- apply(excl, 1, data.table::frank)/ncol(logbeta)
+  frex <- 1/(w/freqscore + (1 - w)/exclscore)
+  frex
+}
+
+
+fem_beta_3 <- tidy(fem_stm_3, matrix = "beta") %>%
+  pivot_wider(names_from = "topic", values_from = beta,
+              names_prefix = "b" )
+
+fem_words_frombeta <- tidy(fem_stm_3, matrix = "beta") %>%
+  select(term) %>%
+  distinct() %>%
+  data.frame()
+
+fem_just_frex <- data.frame(fem_frex_values(fem_stm_3))
+
+fem_word_frex <- bind_cols(fem_words_frombeta, fem_just_frex) %>%
+  rename(Topic1 = X1, Topic2 = X2, Topic3 = X3)
+
+```
+
+#### visualizing female frex
+```{r}
+
+fem_frex_beta <- full_join(fem_word_frex, fem_beta_3)
+
+fem_frex_top <- fem_word_frex %>%
+  pivot_longer(2:4, names_to = "topic", values_to = "FREX") %>%
+  group_by(topic) %>%
+  top_n(20, FREX)
+
+
+fem_frex_top %>%
+  mutate(term = reorder(term, FREX)) %>%
+  ggplot(aes(term, FREX, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+
+
+```
+The title of the topics that I have discerned are:
+Topic 1: Talking about an event to come and what led up to it
+Topic 2: Actively pursuing a goal
+Topic 3: Accomplishments
+
+### male topic modeling and analysis
+```{r}
+
+tm_male_pro <- bigram_counts_all_tm %>%
+  filter(type1 == 'he'|type1 == 'him'|type1 == 'his'|type1 == 'himself')
+  
+stm_male <- tm_male_pro %>%
+  select(term) %>%
+  mutate(newID = 1:n()) %>%
+  rename(documents = term)
+
+
+processed_male <- textProcessor(documents = stm_male$documents, 
+                           removestopwords = TRUE,
+                           removenumbers = TRUE,
+                           stem = FALSE)
+
+out_male <-  prepDocuments(documents = processed_male$documents, 
+                     vocab = processed_male$vocab)
+
+set.seed(3)
+male_searchK <- searchK(out_male$documents, out_male$vocab, 
+                        K = c(2, 3, 4, 5))
+
+plot(male_searchK) 
+#interesting semco are not very different but 3 has much higher residuals
+
+# extract exclus as it represents exclus using FREX approach
+male_extract_searchK <- male_searchK$results
+
+plot(male_extract_searchK$K, male_extract_searchK$exclus) 
+#4 has higher exclusivity and looks best here
+#Going to explore 3 vs 4 because 3 had better semco
+```
+
+#### Further male TM Topic Analysis: Exclusivity
+```{r}
+male_stm_3 <- stm(documents = out_male$documents, vocab = out_male$vocab,
+                       K = 3, 
+                       max.em.its = 75,
+                       init.type = "Spectral")
+
+male_stm_4 <- stm(documents = out_male$documents, vocab = out_male$vocab,
+                       K = 4, 
+                       max.em.its = 75,
+                       init.type = "Spectral")
+
+#exclusivity 3 vs 4
+
+mex3 <- exclusivity(male_stm_3)
+mex3 <- mean(mex3)
+
+mex4 <- exclusivity(male_stm_4)
+mex4 <- mean(mex4)
+
+
+K <- c(3, 4)
+mex <- c(mex3, mex4)
+mex <- data.frame(K, mex)
+plot(mex$K, mex$mex)
+
+#4 looks gooooooood again
+
+```
+#### Further male TM Analysis: Semantic Coherence
+```{r}
+
+msc3 <- semanticCoherence(male_stm_3, documents = out_male$documents)
+msc3 <- mean(msc3)
+
+msc4 <- semanticCoherence(male_stm_4, documents = out_male$documents)
+msc4 <- mean(msc4)
+
+
+
+K <- c(3, 4)
+msc <- c(msc3, msc4)
+msc <- data.frame(K, msc)
+plot(msc$K, msc$msc)
+
+#very minor difference between 3 and 4 with exclusivity with 4 being slightly more exclusive, 3 does show more semco but not by very much. Due to 4 have higher exclusivity and better residual, I am going to go with K = 4
+```
+### Making the male Tweet Model with K = 4
+```{r}
+male_select4 <- selectModel(out_male$documents, out_male$vocab, K = 4,
+                               max.em.its = 75,
+                              runs = 20, 
+                             seed = 1)
+
+plotModels(male_select4)
+
+selectedmodel_4 <- male_select4$runout[[4]]
+
+labelTopics(selectedmodel_4)
+
+
+```
+
+#### male Tweet FREX
+```{r}
+
+male_frex_values <- function (stm_obj, w = 0.5, wordcounts = NULL) {
+  logbeta <- stm_obj$beta$logbeta[[1]]
+  excl <- t(t(logbeta) - stm:::col.lse(logbeta))
+  if (!is.null(wordcounts)) {
+    excl <- stm:::safelog(sapply(1:ncol(excl), function(x) js.estimate(exp(excl[,
+                                                                          x]), wordcounts[x])))
+  }
+  freqscore <- apply(logbeta, 1, data.table::frank)/ncol(logbeta)
+  exclscore <- apply(excl, 1, data.table::frank)/ncol(logbeta)
+  frex <- 1/(w/freqscore + (1 - w)/exclscore)
+  frex
+}
+
+
+male_beta_4 <- tidy(male_stm_4, matrix = "beta") %>%
+  pivot_wider(names_from = "topic", values_from = beta,
+              names_prefix = "b" )
+
+male_words_frombeta <- tidy(male_stm_4, matrix = "beta") %>%
+  select(term) %>%
+  distinct() %>%
+  data.frame()
+
+male_just_frex <- data.frame(male_frex_values(male_stm_4))
+
+male_word_frex <- bind_cols(male_words_frombeta, male_just_frex) %>%
+  rename(Topic1 = X1, Topic2 = X2, Topic3 = X3, Topic4 = X4)
+
+```
+
+#### visualizing male frex
+```{r}
+
+male_frex_beta <- full_join(male_word_frex, male_beta_4)
+
+
+
+male_frex_top <- male_word_frex %>%
+  pivot_longer(2:5, names_to = "topic", values_to = "FREX") %>%
+  group_by(topic) %>%
+  top_n(20, FREX)
+
+
+male_frex_top %>%
+  mutate(term = reorder(term, FREX)) %>%
+  ggplot(aes(term, FREX, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+
+
+```
+When looking at these four topics, I believe the topics are as follows:
+Topic 1: Team
+Topic 2: A non-athletic event
+Topic 3: Winning a championship
+Topic 4: Results or consequences
+
+## Conclusion
+When using sentiment analysis, there appears to be a slight difference in AFINN means between male and female tweets. Male tweets appear to be slightly negative and female tweets appear to be slightly positive. The frequency of male tweets is higher making the frequency of negative words higher for male tweets. It also appears that male tweets have stronger negative words according to AFINN values than female tweets do. Female tweets were not associated with any words scoring a -5 on AFINN but male tweets were. When comparing negative words between male and female tweets, a subjective observation would be that male tweets are associated with worse words than females.
+
+When analyzing the topics for all tweets, female tweets, and male tweets, there was not a clear and distinct difference in topics that I could discern. Obviously most of the topics had to do with athletics and tournaments given the data set. I did find it interesting, however, that one male topic did not seem to fall into that category and instead seemed to talk about a non-athletic event. I was surprised that the topics were so similar regardless of the gender associated with the data sample. To me this says that men and women are talked about in similar ways regarding this topic. Both male and female samples have topics that are active and about a championship. I expected to see a topic that did not have to do with sports in the female topics, but did not see such result. If I increased the K value to 4 or higher, maybe I would find a topic about something other than sports for females, however that would go against the criteria of finding a proper fitting model and would compromise validity. Seeing no distinct difference in the topics leads me to believe that there are little to no differences in how male and female athletes are discussed around a similar caliber event such as the NCAA Basketball Championship.
+
+I find these results interesting because I thought there would be a clear difference in topics associated with women versus men. I felt that women would be judged more harshly because they were women in sports. I was pleasantly surprised that the female tweets had more positive AFINN and BING scores than the male tweets. I also was happy to see no clear difference in the topics. To me this signifies equality in how male and female athletes are being talked about, and as a woman in sports, that's all you can ask for.
+
