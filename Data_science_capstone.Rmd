@@ -44,11 +44,7 @@ library(kableExtra)
 Initially I wanted to scrape the web for tweets directly from Twitter. This required obtaining developer permission from Twitter itself. Once granted permission to use twitter data for an academic project, you are given APIs and access keys that allow you to pull the tweets. With these things you have the ability to pull a set number of tweets per hour. When I went to pull tweets, however, I was limited to fewer tweets than I felt would be a good sample size. I still wanted to share what I had learned and show off this web scraping so that code is below:
 ```{r}
 
-API_key <- '2QzrNmA0DJygRE72AP4rQ9Zav'
-API_secret <- 'wJcbH7E4FgUjsyTVHWeetbYVeBBDBhuxysfnPdJkzMmpBfQNXE'
-bearer <- 'AAAAAAAAAAAAAAAAAAAAAKNyMQEAAAAAzzJs%2FyVlCU6ik%2B3aUXD7Zwrv47c%3DbnETvgAIQdElmbbrrew6dkljAZqVblSUe4bZvPeR0jv9qQ0obN'
-acc_token <- '2736722153-jGsku94gDeosoRsudPB67jk8xY4L4ZDDMv3FQot'
-acc_secret <- 'gPLA8olxw7TIxdCEWdGM7eeSSgtDfKf6TlgDHwE8Ptrff'
+
 
 setup_twitter_oauth(API_key, API_secret, acc_token, acc_secret)
 
